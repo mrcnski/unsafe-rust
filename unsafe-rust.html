@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Memory Management in Unsafe Rust</title>
+<meta name="author" content="(Marcin Swieczkowski)"/>
+<style type="text/css">
+.underline { text-decoration: underline; }
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js/css/reveal.css"/>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js/css/theme/black.css" id="theme"/>
+
+
+<!-- If the query includes 'print-pdf', include the PDF print sheet -->
+<script>
+    if( window.location.search.match( /print-pdf/gi ) ) {
+        var link = document.createElement( 'link' );
+        link.rel = 'stylesheet';
+        link.type = 'text/css';
+        link.href = 'https://cdn.jsdelivr.net/npm/reveal.js/css/print/pdf.css';
+        document.getElementsByTagName( 'head' )[0].appendChild( link );
+    }
+</script>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+<section id="sec-title-slide"><h1>Memory Management in Unsafe Rust<h2><br>Marcin Swieczkowski<br><br>17-08-18
+</section>
+
+<section>
+<section id="slide-org90268b7">
+<h2 id="org90268b7">Agenda</h2>
+<ul>
+<li>Memory Layout (Background)</li>
+<li>Problems with C</li>
+<li>Enter Rust</li>
+<li>Unsafe Rust and FFI</li>
+<li>Memory Tools</li>
+
+</ul>
+</section>
+</section>
+<section>
+<section id="slide-org67c5a1f">
+<h2 id="org67c5a1f">Memory Layout (Background)</h2>
+<div class="outline-text-2" id="text-org67c5a1f">
+</div>
+</section>
+<section id="slide-org9864119">
+<h3 id="org9864119">Overview</h3>
+
+<div class="figure">
+<p><img src="https://1.bp.blogspot.com/--K44cqPMBLE/U9YysG3by-I/AAAAAAAACC4/GS_Q_vPLU3g/s1600/memlayout.png" alt="memlayout.png" width="50%" height="50%" />
+</p>
+<p><span class="figure-number">Figure 1: </span><a href="https://knavite.blogspot.com/2014/07/linux-memory-layout-test-through-c.html">https://knavite.blogspot.com/2014/07/linux-memory-layout-test-through-c.html</a></p>
+</div>
+</section>
+<section id="slide-orgfaa541d">
+<h3 id="orgfaa541d">Text section</h3>
+<ul>
+<li>Includes executable code and global variables (initialized and uninitialized).</li>
+<li>Designated space does not grow.</li>
+
+</ul>
+</section>
+<section id="slide-orgde8f256">
+<h3 id="orgde8f256">The Stack</h3>
+
+<div class="figure">
+<p><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/ProgramCallStack2_en.png/800px-ProgramCallStack2_en.png" alt="800px-ProgramCallStack2_en.png" width="40%" height="40%" />
+</p>
+<p><span class="figure-number">Figure 2: </span><a href="https://en.wikipedia.org/wiki/Stack_(abstract_data_type)">https://en.wikipedia.org/wiki/Stack_(abstract_data_type)</a></p>
+</div>
+</section>
+<section id="slide-orgb9c6cac">
+<h4 id="orgb9c6cac">Common problems</h4>
+<ul>
+<li>Stack overflows</li>
+<li>Buffer overflow</li>
+
+</ul>
+</section>
+<section id="slide-orgeceba64">
+<h3 id="orgeceba64">The Heap</h3>
+
+<div class="figure">
+<p><img src="https://developer.brewmp.com/sites/default/files/resources/Fragmentation%20and%20low%20memory%20conditions=GUID-99171083-12C5-4E13-8CF6-7500737A188E=1=en=.xml/seq_allocation_deallocation=GUID-0C6A1777-6986-446E-9BC1-771B96F21B68=1=en=Low.png" alt="seq_allocation_deallocation=GUID-0C6A1777-6986-446E-9BC1-771B96F21B68=1=en=Low.png" width="60%" height="60%" />
+</p>
+<p><span class="figure-number">Figure 3: </span><a href="https://developer.brewmp.com/resources/tech-guides/memory-and-heap-technology-guide/high-level-architecture/memory-fragmentation">https://developer.brewmp.com/resources/tech-guides/memory-and-heap-technology-guide/high-level-architecture/memory-fragmentation</a></p>
+</div>
+</section>
+<section id="slide-orgb2a478e">
+<h4 id="orgb2a478e">How it works</h4>
+<ul>
+<li>C program requests a memory block of a certain size using <code>malloc</code>.</li>
+<li><code>malloc</code> is the standard allocator.</li>
+<li>This memory must be deallocated by calling <code>free</code>.</li>
+<li>If memory is not freed, memory usage will continue to grow for the lifetime of the program.</li>
+
+</ul>
+</section>
+<section id="slide-orgb24e50d">
+<h4 id="orgb24e50d">Handling heap-allocated data</h4>
+<ul>
+<li>The C way: manual management
+<ul>
+<li>Error prone: no free, double free, invalid free.</li>
+<li>Dangling pointers</li>
+
+</ul></li>
+<li>Garbage collection
+<ul>
+<li>Widely used, in and out of systems languages.</li>
+<li>Invented in 1959 (!)</li>
+
+</ul></li>
+<li>The Rust way: ownership</li>
+
+</ul>
+</section>
+<section id="slide-orgdba64df">
+<h3 id="orgdba64df">Other</h3>
+<ul>
+<li>Not all memory is directly visible to a C program.</li>
+<li>E.g. files are handled through OS or library, program only sees a numeric file handle.</li>
+<li>Resources can leak if not freed.</li>
+<li>Handled in C++ and Rust with RAII (destructors).</li>
+
+</ul>
+</section>
+<section id="slide-org72ddfbc">
+<h3 id="org72ddfbc">Review</h3>
+
+<div class="figure">
+<p><img src="https://1.bp.blogspot.com/--K44cqPMBLE/U9YysG3by-I/AAAAAAAACC4/GS_Q_vPLU3g/s1600/memlayout.png" alt="memlayout.png" width="50%" height="50%" />
+</p>
+<p><span class="figure-number">Figure 4: </span><a href="https://knavite.blogspot.com/2014/07/linux-memory-layout-test-through-c.html">https://knavite.blogspot.com/2014/07/linux-memory-layout-test-through-c.html</a></p>
+</div>
+</section>
+<section id="slide-org6bfaa19">
+<h3 id="org6bfaa19">Misc Notes</h3>
+<ul>
+<li>This layout is an abstraction, specified by C standard.</li>
+<li>Holds irregardless of platform.</li>
+<li>C runs on an <b><b>abstract machine</b></b>.</li>
+<li>We didn't cover details e.g. virtual memory, paging, caching, registers, etc.</li>
+<li>May not be reflected in hardware.</li>
+
+</ul>
+</section>
+</section>
+<section>
+<section id="slide-org465b62a">
+<h2 id="org465b62a">Problems with C</h2>
+<div class="outline-text-2" id="text-org465b62a">
+</div>
+</section>
+<section id="slide-org09eba33">
+<h3 id="org09eba33">Already Mentioned</h3>
+<ul>
+<li>Memory leaks.</li>
+<li>Segmentation faults.</li>
+<li>Buffer overflows.</li>
+
+</ul>
+</section>
+<section id="slide-org216803e">
+<h3 id="org216803e">Thread safety</h3>
+<ul>
+<li>Prone to data races.</li>
+
+</ul>
+</section>
+<section id="slide-orge76d17c">
+<h3 id="orge76d17c">Undefined Behavior</h3>
+<p>
+"[&#x2026;] behavior, upon use of a nonportable or erroneous program construct or of erroneous data, for which this International Standard imposes no requirements"
+</p>
+</section>
+<section id="slide-orge7cacb9">
+<h4 id="orge7cacb9">What is UB?</h4>
+<ul>
+<li>Conditions in which the compiler is allowed to do anything, according to the standard.</li>
+<li>Wait, I thought computers were deterministic?</li>
+<li>Adds uncertainty and mental overhead when programming &#x2013; controversial.</li>
+
+</ul>
+</section>
+<section id="slide-org6759a5f">
+<h4 id="org6759a5f">Examples</h4>
+<ul>
+<li>Division by zero</li>
+<li>Arithmetic overflow</li>
+<li>Out-of-bounds access</li>
+<li>Ambiguous statements</li>
+
+</ul>
+<div class="org-src-container">
+
+<pre  class="src src-c"><code trim><span style="color: #d65946;">a</span>[i] <span style="color: #df9522;">=</span> i<span style="color: #df9522;">++;</span> <span style="color: #858585; font-style: italic;">// </span><span style="color: #858585; font-style: italic;">undefined behavior</span>
+</code></pre>
+</div>
+<ul>
+<li>Dereferencing a null pointer</li>
+
+</ul>
+</section>
+<section id="slide-org19d008d">
+<h4 id="org19d008d">Why?</h4>
+<div class="outline-text-4" id="text-org19d008d">
+</div>
+<ul class="org-ul">
+<li><a id="org7f75285"></a>Rationale<br />
+<ul>
+<li>Originally was meant to account for architecture differences.
+<ul>
+<li>E.g. different ways of dealing with overflow of integer addition.</li>
+
+</ul></li>
+<li>Early compilers did not optimize much if at all, so this is an unforeseen benefit of UB.</li>
+<li>Nowadays relying on platform-specific behavior is dangerous. The compiler can do anything with UB.</li>
+
+</ul>
+</li>
+</ul>
+</section>
+<section id="slide-org3ecce50">
+<h4 id="org3ecce50">Signed integer addition</h4>
+<div class="org-src-container">
+
+<pre  class="src src-c"><code trim><span style="color: #d65946;">int</span> <span style="color: #1bd197ac709b;">foo</span>(<span style="color: #d65946;">int</span> <span style="color: #baba36;">x</span>) {
+    <span style="color: #598bc1;">return</span> x<span style="color: #df9522;">+</span><span style="color: #df9522;">1</span> <span style="color: #df9522;">&gt;</span> x<span style="color: #df9522;">;</span> <span style="color: #858585; font-style: italic;">// </span><span style="color: #858585; font-style: italic;">either true or UB due to signed overflow</span>
+}
+</code></pre>
+</div>
+
+<p>
+may be compiled as:
+</p>
+
+<div class="org-src-container">
+
+<pre  class="src src-asm"><code trim><span style="color: #1bd197ac709b;">foo</span>(int):
+        <span style="color: #598bc1;">movl</span>    $1, <span style="color: #baba36;">%eax</span>
+        <span style="color: #598bc1;">ret</span>
+</code></pre>
+</div>
+</section>
+<section id="slide-org178c6d4">
+<h4 id="org178c6d4">More</h4>
+<p>
+See <a href="https://en.cppreference.com/w/cpp/language/ub#UB_and_optimization">https://en.cppreference.com/w/cpp/language/ub#UB_and_optimization</a>
+</p>
+
+</section>
+</section>
+<section>
+<section id="slide-orgccbaf49">
+<h2 id="orgccbaf49">Enter Rust</h2>
+<p>
+"Rust is a systems programming language that runs blazingly fast, prevents segfaults, and guarantees thread safety." - rustlang.org
+</p>
+</section>
+<section id="slide-org2880ddf">
+<h3 id="org2880ddf">Rust vs. C</h3>
+<ul>
+<li>Performance close to C.</li>
+<li>No need to worry about manual memory management.</li>
+<li>No UB in safe Rust.
+<ul>
+<li>Different philosophy: for optimizations, give compiler as much info as possible.</li>
+
+</ul></li>
+
+</ul>
+
+</section>
+<section id="slide-org172c6b4">
+<h3 id="org172c6b4">Rust Memory Model</h3>
+<ul>
+<li>Layout is similar to C.</li>
+<li>Also includes:
+<ul>
+<li>Ownership
+<ul>
+<li>Bound resources freed at end of scope.</li>
+<li>Solves memory leaks.</li>
+
+</ul></li>
+<li>Borrowing
+<ul>
+<li>Solves data races.</li>
+
+</ul></li>
+<li>Lifetimes
+<ul>
+<li>Solves segfaults (use-after-free).</li>
+
+</ul></li>
+
+</ul></li>
+
+</ul>
+</section>
+<section id="slide-orge782013">
+<h3 id="orge782013">Rust Memory Model</h3>
+<p>
+This is all enforced at compile-time. No run-time cost (unlike GC).
+</p>
+
+<ul>
+<li>See <a href="https://doc.rust-lang.org/reference/memory-model.html">https://doc.rust-lang.org/reference/memory-model.html</a></li>
+
+</ul>
+
+<p>
+Does have run-time checks, including:
+</p>
+<ul>
+<li>out-of-bounds access -&gt; panic! (solves buffer overflows)</li>
+<li>arithmetic overflow -&gt; depends!</li>
+<li>Memory safety &gt; performance/optimization in these cases.</li>
+
+</ul>
+</section>
+</section>
+<section>
+<section id="slide-orgeea2f87">
+<h2 id="orgeea2f87">Unsafe Rust and FFI</h2>
+<div class="outline-text-2" id="text-orgeea2f87">
+</div>
+</section>
+<section id="slide-org2a84cc5">
+<h3 id="org2a84cc5">Safe vs Unsafe</h3>
+
+<div class="figure">
+<p><object type="image/svg+xml" data="https://doc.rust-lang.org/nomicon/img/safeandunsafe.svg" class="org-svg" width="80%" height="80%">
+Sorry, your browser does not support SVG.</object>
+</p>
+<p><span class="figure-number">Figure 5: </span><a href="https://doc.rust-lang.org/nomicon/meet-safe-and-unsafe.html">https://doc.rust-lang.org/nomicon/meet-safe-and-unsafe.html</a></p>
+</div>
+</section>
+<section id="slide-orgacc8957">
+<h3 id="orgacc8957">Safe vs Unsafe</h3>
+<ul>
+<li>Safe Rust does not have UB, despite being a systems programming language.</li>
+<li>It accomplishes this by:
+<ul>
+<li>The ownership + borrowing + lifetimes model.</li>
+<li>Providing a safe API for memory allocations (<code>Box</code>, <code>Vec</code> etc.).</li>
+<li>Not allowing the dereference of a raw pointer or access to mutable static variables.</li>
+
+</ul></li>
+
+</ul>
+</section>
+<section id="slide-org2238b08">
+<h3 id="org2238b08">Safe vs Unsafe</h3>
+<ul>
+<li>Unsafe Rust allows you to:
+<ul>
+<li>Dereference a raw pointer</li>
+<li>Call an unsafe function or method</li>
+<li>Access or modify a mutable static variable</li>
+<li>Implement an unsafe trait</li>
+
+</ul></li>
+<li>Does not turn off borrow checker, but can get around it using pointers instead of references.</li>
+
+</ul>
+</section>
+<section id="slide-org66bc13b">
+<h3 id="org66bc13b">Why?</h3>
+<ul>
+<li>Unsafe allows you to:
+<ul>
+<li>Perform optimizations in space and performance.</li>
+<li>Circumvent safety checks in cases where you believe the code is correct.</li>
+<li>Directly call an unsafe API in a way that you believe is safe, so you can provide a safe interface.</li>
+
+</ul></li>
+
+</ul>
+</section>
+<section id="slide-orgd23d9a6">
+<h3 id="orgd23d9a6">Examples of memory-buggy "safe" code</h3>
+<p>
+"Memory unsafety is doing something with invalid data, a memory leak is not doing something with valid data."
+</p>
+
+<p>
+<a href="https://huonw.github.io/blog/2016/04/memory-leaks-are-memory-safe/">https://huonw.github.io/blog/2016/04/memory-leaks-are-memory-safe/</a>
+</p>
+
+<p>
+Memory leaks are considered "safe" and possible in Rust (e.g. <code>mem::forget</code>).
+</p>
+</section>
+<section id="slide-orge20f4d4">
+<h3 id="orge20f4d4">FFI</h3>
+<p>
+What if you want to talk to another language?
+</p>
+</section>
+<section id="slide-org71db217">
+<h4 id="org71db217">FFI in Rust</h4>
+<ul>
+<li>Need to use native C types.
+<ul>
+<li>Difference between native <code>char</code> and FFI <code>c_char</code>.</li>
+
+</ul></li>
+<li>Need to use pointers. <i>References</i> are a Rust concept.</li>
+<li>Need to catch panics (undefined behavior across FFI boundary).</li>
+
+</ul>
+</section>
+<section id="slide-orgd361bb3">
+<h4 id="orgd361bb3">Example</h4>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #df9522;">#[no_mangle]</span>
+<span style="color: #598bc1;">pub</span> <span style="color: #598bc1;">extern</span> <span style="color: #598bc1;">fn</span> <span style="color: #1bd197ac709b;">hello_rust</span>() -&gt; *<span style="color: #598bc1;">const</span> <span style="color: #d65946;">u8</span> {
+    <span style="color: #6aaf50;">"Hello, world!\0"</span>.as_ptr()
+}
+</code></pre>
+</div>
+</section>
+<section id="slide-org8b33571">
+<h4 id="org8b33571">PARSEC FFI</h4>
+<ul>
+<li>Requirements
+<ul>
+<li>Synchronous.</li>
+<li>Must expose all functionality from native Rust PARSEC API.</li>
+
+</ul></li>
+
+</ul>
+</section>
+<section id="slide-org604c9a3">
+<h4 id="org604c9a3">The way it works</h4>
+<ul>
+<li>Output parameters.</li>
+<li>Error codes.</li>
+<li>Resource handles.</li>
+
+</ul>
+</section>
+<section id="slide-orge455e26">
+<h4 id="orge455e26">PublicId Example</h4>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #df9522;">#[no_mangle]</span>
+<span style="color: #598bc1;">pub</span> <span style="color: #f57e00; font-weight: bold;">unsafe</span> <span style="color: #598bc1;">extern</span> <span style="color: #6aaf50;">"C"</span> <span style="color: #598bc1;">fn</span> <span style="color: #1bd197ac709b;">public_id_from_bytes</span>(
+    <span style="color: #baba36;">bytes</span>: *<span style="color: #598bc1;">const</span> <span style="color: #d65946;">u8</span>,
+    <span style="color: #baba36;">bytes_len</span>: <span style="color: #d65946;">usize</span>,
+    <span style="color: #baba36;">o_public_id</span>: *<span style="color: #598bc1;">mut</span> *<span style="color: #598bc1;">const</span> <span style="color: #d65946;">PublicId</span>,
+) -&gt; <span style="color: #d65946;">i32</span> {
+    <span style="color: #ab75c3;">utils</span>::catch_unwind_err_set(|| -&gt; <span style="color: #d65946;">Result</span>&lt;_, <span style="color: #d65946;">Error</span>&gt; {
+        <span style="color: #598bc1;">let</span> <span style="color: #baba36;">public_id</span> = <span style="color: #ab75c3;">slice</span>::from_raw_parts(bytes, bytes_len);
+        <span style="color: #598bc1;">let</span> <span style="color: #baba36;">peer_id</span> = <span style="color: #d65946;">PeerId</span>::new(<span style="color: #d65946;">str</span>::from_utf8(public_id)<span style="color: #598bc1; font-weight: bold;">?</span>);
+
+        *o_public_id = <span style="color: #d65946;">Box</span>::into_raw(<span style="color: #d65946;">Box</span>::new(<span style="color: #d65946;">PublicId</span>(peer_id)));
+        <span style="color: #d65946;">Ok</span>(())
+    })
+}
+</code></pre>
+</div>
+</section>
+<section id="slide-org0630e7e">
+<h4 id="org0630e7e">PublicId Example</h4>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #df9522;">#[no_mangle]</span>
+<span style="color: #598bc1;">pub</span> <span style="color: #f57e00; font-weight: bold;">unsafe</span> <span style="color: #598bc1;">extern</span> <span style="color: #6aaf50;">"C"</span> <span style="color: #598bc1;">fn</span> <span style="color: #1bd197ac709b;">public_id_as_bytes</span>(
+    <span style="color: #baba36;">public_id</span>: *<span style="color: #598bc1;">const</span> <span style="color: #d65946;">PublicId</span>,
+    <span style="color: #baba36;">o_bytes</span>: *<span style="color: #598bc1;">mut</span> *<span style="color: #598bc1;">const</span> <span style="color: #d65946;">u8</span>,
+    <span style="color: #baba36;">o_bytes_len</span>: *<span style="color: #598bc1;">mut</span> <span style="color: #d65946;">usize</span>,
+) -&gt; <span style="color: #d65946;">i32</span> {
+    <span style="color: #ab75c3;">utils</span>::catch_unwind_err_set(|| -&gt; <span style="color: #d65946;">Result</span>&lt;_, <span style="color: #d65946;">Error</span>&gt; {
+        <span style="color: #598bc1;">let</span> <span style="color: #baba36;">bytes</span> = (*public_id).<span style="color: #df9522;">0</span>.as_bytes();
+
+        *o_bytes = bytes.as_ptr();
+        *o_bytes_len = bytes.len();
+        <span style="color: #d65946;">Ok</span>(())
+    })
+}
+</code></pre>
+</div>
+</section>
+<section id="slide-org39a2fa7">
+<h4 id="org39a2fa7">PublicId Example</h4>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #df9522;">#[no_mangle]</span>
+<span style="color: #598bc1;">pub</span> <span style="color: #f57e00; font-weight: bold;">unsafe</span> <span style="color: #598bc1;">extern</span> <span style="color: #6aaf50;">"C"</span> <span style="color: #598bc1;">fn</span> <span style="color: #1bd197ac709b;">public_id_free</span>(<span style="color: #baba36;">public_id</span>: *<span style="color: #598bc1;">const</span> <span style="color: #d65946;">PublicId</span>) -&gt; <span style="color: #d65946;">i32</span> {
+    <span style="color: #ab75c3;">utils</span>::catch_unwind_err_set(|| -&gt; <span style="color: #d65946;">Result</span>&lt;_, <span style="color: #d65946;">Error</span>&gt; {
+        <span style="color: #598bc1;">let</span> <span style="color: #baba36;">_</span> = <span style="color: #d65946;">Box</span>::from_raw(public_id <span style="color: #598bc1;">as</span> *<span style="color: #598bc1;">mut</span> <span style="color: #d65946;">PublicId</span>);
+        <span style="color: #d65946;">Ok</span>(())
+    })
+}
+</code></pre>
+</div>
+</section>
+<section id="slide-orgba5b81a">
+<h3 id="orgba5b81a">Undefined behavior in unsafe Rust</h3>
+<div class="outline-text-3" id="text-orgba5b81a">
+</div>
+</section>
+<section id="slide-orgc16be80">
+<h4 id="orgc16be80">Examples</h4>
+<ul>
+<li>Data races.</li>
+<li>Dereferencing a null or dangling raw pointer.</li>
+<li>Reads of undef (uninitialized) memory.</li>
+
+</ul>
+
+<p>
+See <a href="https://doc.rust-lang.org/beta/reference/behavior-considered-undefined.html">https://doc.rust-lang.org/beta/reference/behavior-considered-undefined.html</a>
+</p>
+</section>
+<section id="slide-org184cda0">
+<h4 id="org184cda0">Unsafe</h4>
+<ul>
+<li>Writers of unsafe code must ensure that safe code cannot exhibit UB.</li>
+<li>For example, safe interfaces in the standard library rely on "unsafe" implementations under the hood.
+<ul>
+<li>e.g. <code>Vec</code>, the standard "dynamic array" type in Rust. Allocates on heap.</li>
+<li><code>Vec</code> contains unsafe code to perform allocations.</li>
+<li>We trust that the safe interface it provides is solid and does not leak UB.</li>
+
+</ul></li>
+
+</ul>
+</section>
+<section id="slide-org14bc3e9">
+<h4 id="org14bc3e9">mem::initialized and related UB</h4>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #f57e00; font-weight: bold;">unsafe</span> {
+    <span style="color: #858585; font-style: italic;">// </span><span style="color: #858585; font-style: italic;">Allocate a value, of type required by FFI function.</span>
+    <span style="color: #598bc1;">let</span> <span style="color: #598bc1;">mut</span> <span style="color: #baba36;">output</span>: <span style="color: #d65946;">T</span> = <span style="color: #ab75c3;">mem</span>::uninitialized();
+
+    <span style="color: #858585; font-style: italic;">// </span><span style="color: #858585; font-style: italic;">Call FFI function.</span>
+    <span style="color: #598bc1;">let</span> <span style="color: #baba36;">res</span> = f(&amp;<span style="color: #598bc1;">mut</span> output);<span style="color: #598bc1; background-color: #1a1a1a; font-weight: bold;"> </span>
+
+    <span style="color: #858585; font-style: italic;">// </span><span style="color: #858585; font-style: italic;">Check error code.</span>
+    <span style="color: #598bc1;">if</span> res == <span style="color: #df9522;">0</span> {
+        <span style="color: #d65946;">Ok</span>(output)
+    } <span style="color: #598bc1;">else</span> {
+        <span style="color: #d65946;">Err</span>(res)
+    }
+}
+</code></pre>
+</div>
+</section>
+<section id="slide-org8304a3b">
+<h4 id="org8304a3b">mem::zeroed and related UB</h4>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #f57e00; font-weight: bold;">unsafe</span> {
+    <span style="color: #598bc1;">let</span> <span style="color: #598bc1;">mut</span> <span style="color: #baba36;">output</span>: <span style="color: #d65946;">T</span> = <span style="color: #ab75c3;">mem</span>::zeroed();
+
+    <span style="color: #858585; font-style: italic;">// </span><span style="color: #858585; font-style: italic;">Call FFI function.</span>
+    <span style="color: #598bc1;">let</span> <span style="color: #baba36;">res</span> = f(&amp;<span style="color: #598bc1;">mut</span> output);
+
+    <span style="color: #598bc1;">if</span> res == <span style="color: #df9522;">0</span> {
+        <span style="color: #d65946;">Ok</span>(output)
+    } <span style="color: #598bc1;">else</span> {
+        <span style="color: #d65946;">Err</span>(res)
+    }
+}
+</code></pre>
+</div>
+</section>
+</section>
+<section>
+<section id="slide-orgf3ed7af">
+<h2 id="orgf3ed7af">Memory Tools</h2>
+<div class="outline-text-2" id="text-orgf3ed7af">
+</div>
+</section>
+<section id="slide-orgddd65ae">
+<h3 id="orgddd65ae">Why?</h3>
+<ul>
+<li>As we have seen, FFI (and other unsafe Rust) is error-prone and hard to reason about, due to UB.</li>
+<li>Anytime we work with raw pointers, memory errors (dangling pointers, invalid dereferences) are possible.</li>
+<li>Luckily, many of the same tools developed for C will work for Rust!</li>
+
+</ul>
+</section>
+<section id="slide-orgbb4886d">
+<h3 id="orgbb4886d">The Easy Way</h3>
+<p>
+Compare memory before and after!
+</p>
+
+
+<div class="figure">
+<p><img src="./img/procinfo1.png" alt="procinfo1.png" width="70%" height="70%" />
+</p>
+</div>
+</section>
+<section id="slide-orgcd7a29c">
+<h3 id="orgcd7a29c">The Easy Way</h3>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #598bc1;">let</span> <span style="color: #baba36;">payload</span> = b<span style="color: #6aaf50;">"hello world"</span>;
+
+<span style="color: #f57e00; font-weight: bold;">unsafe</span> {
+    <span style="color: #598bc1;">let</span> <span style="color: #598bc1;">mut</span> <span style="color: #baba36;">block</span> = <span style="color: #ab75c3;">mem</span>::zeroed();
+
+    <span style="color: #df9522;">assert_ffi!</span>(block_new(
+        payload.as_ptr(),
+        payload.len(),
+        <span style="color: #ab75c3;">ptr</span>::null(),
+        <span style="color: #ab75c3;">ptr</span>::null(),
+        <span style="color: #df9522;">0</span>,
+        &amp;<span style="color: #598bc1;">mut</span> block,
+    ));
+
+    <span style="color: #858585; font-style: italic;">// </span><span style="color: #858585; font-style: italic;">assert_ffi!(block_free(block as *mut _));</span>
+}
+</code></pre>
+</div>
+</section>
+<section id="slide-orgedbbc65">
+<h3 id="orgedbbc65">The Easy Way</h3>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #598bc1;">let</span> <span style="color: #baba36;">memory_before</span> = <span style="color: #df9522;">unwrap!</span>(<span style="color: #ab75c3;">procinfo</span>::<span style="color: #ab75c3;">pid</span>::statm_self()).resident;
+
+<span style="color: #858585; font-style: italic;">// </span><span style="color: #858585; font-style: italic;">Run the function some number of times.</span>
+<span style="color: #598bc1;">for</span> <span style="color: #baba36;">_</span> <span style="color: #598bc1;">in</span> <span style="color: #df9522;">1</span>..num_iterations {
+    f();
+}
+
+<span style="color: #598bc1;">let</span> <span style="color: #baba36;">memory_after</span> = <span style="color: #df9522;">unwrap!</span>(<span style="color: #ab75c3;">procinfo</span>::<span style="color: #ab75c3;">pid</span>::statm_self()).resident;
+</code></pre>
+</div>
+</section>
+<section id="slide-org7406d9f">
+<h3 id="org7406d9f">The Easy Way</h3>
+
+<div class="figure">
+<p><img src="./img/procinfo2.png" alt="procinfo2.png" width="70%" height="70%" />
+</p>
+</div>
+</section>
+<section id="slide-org00b511b">
+<h3 id="org00b511b">Valgrind</h3>
+<div class="outline-text-3" id="text-org00b511b">
+</div>
+</section>
+<section id="slide-org4da95d5">
+<h4 id="org4da95d5">What is it?</h4>
+<ul>
+<li>Open source debugging framework.</li>
+<li>Suite of dynamic analysis tools such as checkers and profilers.</li>
+<li>Takes compiled binary code, works with many languages (including Rust).</li>
+
+</ul>
+</section>
+<section id="slide-orgf784a31">
+<h4 id="orgf784a31">Memcheck</h4>
+<ul>
+<li>Default tool. Memory debugger.</li>
+<li>Inserts instrumentation around all instructions.</li>
+<li>Keeps track of validity and addressability of heap memory.</li>
+<li>Replaces standard memory allocator, inserts memory guards.</li>
+<li>20-30x slowdown in performance.</li>
+
+</ul>
+
+</section>
+<section id="slide-org7f6265d">
+<h4 id="org7f6265d">Memcheck</h4>
+<p>
+It can find the following:
+</p>
+<ul>
+<li>Use of uninitialized memory</li>
+<li>Reading/writing memory after it has been free'd</li>
+<li>Reading/writing off the end of malloc'd blocks</li>
+<li>Memory leaks</li>
+
+</ul>
+</section>
+<section id="slide-orga2bbadc">
+<h4 id="orga2bbadc">How to use it?</h4>
+<p>
+Set system allocator (valgrind doesn't work with jemalloc):
+</p>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #598bc1;">use</span> <span style="color: #ab75c3;">std</span>::<span style="color: #ab75c3;">alloc</span>::<span style="color: #d65946;">System</span>;
+
+<span style="color: #df9522;">#[global_allocator]</span>
+<span style="color: #598bc1;">static</span> <span style="color: #baba36;">GLOBAL</span>: <span style="color: #d65946;">System</span> = <span style="color: #d65946;">System</span>;
+</code></pre>
+</div>
+<p>
+Build what you want to check (e.g. tests):
+</p>
+
+<p>
+<code>cargo test ffi --no-run</code>
+</p>
+
+<p>
+Run valgrind:
+</p>
+
+<p>
+<code>valgrind --leak-check=full executable</code> 
+</p>
+</section>
+<section id="slide-orgc237e79">
+<h4 id="orgc237e79">Example</h4>
+
+<div class="figure">
+<p><img src="./img/valgrind1.png" alt="valgrind1.png" width="70%" height="70%" />
+</p>
+</div>
+</section>
+<section id="slide-org2beed47">
+<h3 id="org2beed47">Sanitizers</h3>
+<div class="outline-text-3" id="text-org2beed47">
+</div>
+</section>
+<section id="slide-org6766a90">
+<h4 id="org6766a90">Definition</h4>
+<ul>
+<li>Dynamic (run-time) memory checkers.</li>
+<li>Code must be compiled using a sanitizer, unlike Valgrind.</li>
+<li>Some sanitizers are available to compile Rust code as well.</li>
+<li>Only the ones built on LLVM (Rust's compiler backend) will work.</li>
+
+</ul>
+</section>
+<section id="slide-org6186988">
+<h4 id="org6186988">Examples</h4>
+<ul>
+<li>Address sanitizer: detects out-of-bounds access and use-after-free.</li>
+<li>Leak sanitizer: detects memory leaks.</li>
+<li>Memory sanitizer: detects reads of uninitialized memory.</li>
+<li>Thread sanitizer: detects data races.</li>
+
+</ul>
+</section>
+<section id="slide-org6fbc5c7">
+<h4 id="org6fbc5c7">How to use them?</h4>
+<p>
+<code>RUSTFLAGS="-Z sanitizer=address" cargo test ffi --target x86_64-apple-darwin -- --nocapture</code>
+</p>
+
+<p>
+Possible targets are limited to:
+</p>
+<ul>
+<li>x86<sub>64</sub>-unknown-linux-gnu: supports the <code>address</code>, <code>leak</code>, <code>memory</code>, and <code>thread</code> sanitizers.</li>
+<li>x86<sub>64</sub>-apple-darwin: supports the <code>address</code> and <code>thread</code> sanitizers.</li>
+
+</ul>
+</section>
+<section id="slide-org707c1d1">
+<h4 id="org707c1d1">Example</h4>
+<div class="org-src-container">
+
+<pre  class="src src-rust"><code trim><span style="color: #598bc1;">let</span> <span style="color: #baba36;">payload</span> = b<span style="color: #6aaf50;">"hello world"</span>;
+
+<span style="color: #f57e00; font-weight: bold;">unsafe</span> {
+    <span style="color: #598bc1;">let</span> <span style="color: #598bc1;">mut</span> <span style="color: #baba36;">block</span> = <span style="color: #ab75c3;">mem</span>::zeroed();
+
+    <span style="color: #df9522;">assert_ffi!</span>(block_new(
+      payload.as_ptr(),
+      payload.len(),
+      <span style="color: #ab75c3;">ptr</span>::null(),
+      <span style="color: #ab75c3;">ptr</span>::null(),
+      <span style="color: #df9522;">0</span>,
+      &amp;<span style="color: #598bc1;">mut</span> block,
+    ));
+
+    <span style="color: #df9522;">assert_ffi!</span>(block_free(block <span style="color: #598bc1;">as</span> *<span style="color: #598bc1;">mut</span> _));
+
+    <span style="color: #598bc1;">let</span> <span style="color: #baba36;">payload_output</span> = <span style="color: #df9522;">unwrap!</span>(<span style="color: #ab75c3;">utils</span>::get_vec_u8(|output, len| block_payload(
+      block, output, len
+    )));
+}
+</code></pre>
+</div>
+</section>
+<section id="slide-orgbb50d10">
+<h4 id="orgbb50d10">Example</h4>
+
+<div class="figure">
+<p><img src="./img/san1.png" alt="san1.png" width="70%" height="70%" />
+</p>
+</div>
+</section>
+<section id="slide-org5787a8f">
+<h4 id="org5787a8f">Example</h4>
+
+<div class="figure">
+<p><img src="./img/san1.5.png" alt="san1.5.png" width="70%" height="70%" />
+</p>
+</div>
+</section>
+<section id="slide-org1b93c1e">
+<h4 id="org1b93c1e">Example</h4>
+
+<div class="figure">
+<p><img src="./img/san2.png" alt="san2.png" width="70%" height="70%" />
+</p>
+</div>
+</section>
+<section id="slide-orgdecb695">
+<h3 id="orgdecb695">Other tools</h3>
+<div class="outline-text-3" id="text-orgdecb695">
+</div>
+</section>
+<section id="slide-org731b216">
+<h4 id="org731b216">proptest</h4>
+<ul>
+<li>Try to trigger panics by passing a wide range of values to functions.</li>
+<li>Errors like arithmetic overflow or out-of-bounds access can be found.</li>
+
+</ul>
+<p>
+Examples of bugs found with this tech: <a href="https://huonw.github.io/blog/2016/04/myths-and-legends-about-integer-overflow-in-rust/#myth-the-checks-find-no-bugs">https://huonw.github.io/blog/2016/04/myths-and-legends-about-integer-overflow-in-rust/#myth-the-checks-find-no-bugs</a>
+</p>
+</section>
+<section id="slide-org18b98b1">
+<h4 id="org18b98b1">fuzzing</h4>
+<ul>
+<li>Try to trigger panics by passing in large amounts of data.</li>
+<li>Uses random data (possibly mixed with meaningful data from a corpus).</li>
+
+</ul>
+</section>
+</section>
+</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js/js/reveal.js"></script>
+
+<script>
+// Full list of configuration options available here:
+// https://github.com/hakimel/reveal.js#configuration
+Reveal.initialize({
+multiplex: {
+    secret: '', // null if client
+    id: '', // id, obtained from socket.io server
+    url: '' // Location of socket.io server
+},
+
+// Optional libraries used to extend on reveal.js
+dependencies: [
+ { src: 'https://cdn.jsdelivr.net/npm/reveal.js/lib/js/classList.js', condition: function() { return !document.body.classList; } },
+ { src: 'https://cdn.jsdelivr.net/npm/reveal.js/plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+ { src: 'https://cdn.jsdelivr.net/npm/reveal.js/plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+ { src: 'https://cdn.jsdelivr.net/npm/reveal.js/plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+ { src: 'https://cdn.jsdelivr.net/npm/reveal.js/plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }]
+});
+</script>
+</body>
+</html>
